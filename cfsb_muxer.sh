@@ -32,7 +32,7 @@ die() {
 
 info()    { echo -e "${C_CYAN}  ℹ  ${C_RESET}${C_BOLD}$*${C_RESET}"; }
 success() { echo -e "${C_GREEN}  ✔  ${C_RESET}${C_BOLD}$*${C_RESET}"; }
-warn()    { echo -e "${C_YELLOW}  ⚠  ${C_RESET}$*" >&2; } # Melhoria 3: Enviado para stderr
+warn()    { echo -e "${C_YELLOW}  ⚠  ${C_RESET}$*" >&2; }
 step()    { echo -e "${C_MAGENTA}  ▶  ${C_RESET}${C_BOLD}$*${C_RESET}"; }
 detail()  { echo -e "${C_DIM}       $*${C_RESET}"; }
 
@@ -58,7 +58,6 @@ spinner() {
     tmp_out=$(mktemp)
     tmp_err=$(mktemp)
 
-    # Salva traps existentes e define os nossos
     local old_int old_term
     old_int=$(trap -p INT)
     old_term=$(trap -p TERM)
@@ -79,7 +78,6 @@ spinner() {
 
     tput cnorm 2>/dev/null || true
 
-    # Melhoria 1: Restaura traps de forma robusta com fallback seguro
     [[ -n "$old_int" ]]  && eval "$old_int"  || trap - INT
     [[ -n "$old_term" ]] && eval "$old_term" || trap - TERM
 
@@ -94,7 +92,6 @@ spinner() {
         exit "$exit_code"
     fi
 
-    # Melhoria 2: Remoção do _SPINNER_OUT global que não era consumido
     rm -f "$tmp_out" "$tmp_err"
 }
 
@@ -165,7 +162,6 @@ calc_crc32() {
     local hash
 
     if command -v crc32 &>/dev/null; then
-        # Melhoria 4: Extrai apenas o valor hexadecimal de 8 caracteres (portabilidade)
         hash=$(crc32 "$file" | grep -oP '[0-9a-fA-F]{8}')
     else
         hash=$(cfv -g "$file" | tail -n 1 | awk '{print $NF}')
@@ -176,7 +172,6 @@ calc_crc32() {
 
 # ─── Coleta de entrada do usuário ─────────────────────────────────────────────
 prompt_user() {
-    # Melhoria 6: Uso de nameref para evitar globais implícitas e isolar o escopo
     declare -n ref_anime="$1"
     declare -n ref_ep="$2"
     declare -n ref_src="$3"
@@ -194,7 +189,6 @@ prompt_user() {
     [[ -n "$ref_ep" ]]    || die "Número do episódio não pode ser vazio."
     [[ -n "$ref_src" ]]   || die "Source não pode ser vazio."
 
-    # Melhoria 7: Validação do formato padrão de numeração do episódio
     if [[ ! "$ref_ep" =~ ^[0-9]{2,4}(v[0-9])?$ ]]; then
         warn "Episódio '$ref_ep' fora do padrão numérico esperado (ex: 01, 002, 03v2)."
     fi
@@ -209,7 +203,6 @@ main() {
     local pasta="$1"
     [[ -d "$pasta" ]] || die "Pasta não encontrada: $pasta"
 
-    # Melhoria 6: Inicialização explícita das variáveis locais da main
     local ANIME="" EPISODIO="" SOURCE=""
 
     step "Verificando dependências..."
@@ -218,7 +211,6 @@ main() {
 
     sep
 
-    # Localiza arquivos — exige exatamente 1 de cada
     local -a mkv_files ass_files txt_files
     mapfile -t mkv_files < <(find "$pasta" -maxdepth 1 -type f -name "*.mkv" | sort)
     mapfile -t ass_files < <(find "$pasta" -maxdepth 1 -type f -name "*.ass" | sort)
@@ -237,12 +229,11 @@ main() {
     detail "💬  $(basename "$legenda")"
     detail "📖  $(basename "$capitulos")"
 
-    # Passa as referências das variáveis locais para o prompt
     prompt_user ANIME EPISODIO SOURCE
 
     local tempo_inicial=$SECONDS
 
-    # ── Detecta codecs e resolução (1 chamada mkvmerge -J) ──
+    # ── Detecta codecs e resolução ──
     step "Analisando faixas de mídia..."
     detect_tracks "$mkv_original"
 
@@ -262,7 +253,6 @@ main() {
     nome_base="[$TAG] ${ANIME} - ${EPISODIO} [${qualidade}][${SOURCE}][${video_codec}][${audio_codec}]"
     mkv_temp="${pasta}/${nome_base}_TEMP.mkv"
 
-    # Limpeza de arquivo temporário em qualquer saída
     trap '[[ -n "${mkv_temp:-}" && -f "${mkv_temp:-}" ]] && rm -f "$mkv_temp"' EXIT
 
     rm -f "$mkv_temp"
@@ -292,11 +282,10 @@ main() {
 
     mkv_final="${pasta}/${nome_base}[${hash}].mkv"
     mv -- "$mkv_temp" "$mkv_final"
-    mkv_temp=""  # limpa var pra trap não tentar deletar arquivo já renomeado
+    mkv_temp=""
 
     # ── Thumbnail ──
     thumb="${pasta}/${nome_base}[${hash}].webp"
-    # Melhoria 5: -ss reposicionado após -i e ajuste no filtro de amostragem para evitar telas pretas
     spinner "Gerando thumbnail (ts=${THUMB_TS})..." \
         ffmpeg -loglevel error -i "$mkv_final" -ss "$THUMB_TS" \
             -vf "thumbnail=n=50,setsar=1" -vframes 1 "$thumb" -y
