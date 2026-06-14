@@ -5,7 +5,7 @@ set -euo pipefail
 # ─── Constantes ───────────────────────────────────────────────────────────────
 readonly SCRIPT_NAME="$(basename "$0")"
 readonly TAG="CFSB"
-THUMB_TS="${THUMB_TS:-00:03:00}"
+THUMB_TS="${THUMB_TS:-00:00:30}"
 readonly THUMB_TS
 
 # ─── Cores & Estilos ──────────────────────────────────────────────────────────
