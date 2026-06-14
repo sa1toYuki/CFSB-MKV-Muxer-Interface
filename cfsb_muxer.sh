@@ -5,7 +5,12 @@ set -euo pipefail
 # ─── Constantes ───────────────────────────────────────────────────────────────
 readonly SCRIPT_NAME="$(basename "$0")"
 readonly TAG="CFSB"
-readonly THUMB_TS="${THUMB_TS:-00:03:00}"
+THUMB_TS="${THUMB_TS:-00:03:00}"
+readonly THUMB_TS
+
+# ─── Globais de canal de retorno ──────────────────────────────────────────────
+_MKV_JSON=""
+_SPINNER_OUT=""
 
 # ─── Cores & Estilos ──────────────────────────────────────────────────────────
 if [[ -t 1 ]]; then
@@ -57,7 +62,10 @@ spinner() {
     tmp_out=$(mktemp)
     tmp_err=$(mktemp)
 
-    # Restaura cursor em sinal de interrupção
+    # Salva traps existentes e define os nossos
+    local old_int old_term
+    old_int=$(trap -p INT)
+    old_term=$(trap -p TERM)
     trap 'tput cnorm 2>/dev/null || true; rm -f "$tmp_out" "$tmp_err"; exit 130' INT TERM
 
     "$@" >"$tmp_out" 2>"$tmp_err" &
@@ -74,7 +82,11 @@ spinner() {
     wait "$pid" || exit_code=$?
 
     tput cnorm 2>/dev/null || true
-    trap - INT TERM
+
+    # Restaura traps do pai
+    eval "$old_int"
+    eval "$old_term"
+
     echo -ne "\r"
 
     if [[ $exit_code -eq 0 ]]; then
@@ -94,7 +106,7 @@ spinner() {
 check_deps() {
     local missing=()
 
-    for cmd in mkvmerge mkvinfo ffmpeg; do
+    for cmd in mkvmerge ffmpeg; do
         command -v "$cmd" &>/dev/null || missing+=("$cmd")
     done
 
@@ -102,53 +114,49 @@ check_deps() {
         missing+=("crc32 ou cfv")
     fi
 
-    (( ${#missing[@]} == 0 )) || die "Dependências faltando: ${missing[*]}"
+    [[ ${#missing[@]} -eq 0 ]] || die "Dependências faltando: ${missing[*]}"
 }
 
-# ─── Detecção de faixas (JSON único) ──────────────────────────────────────────
+# ─── Detecção de faixas ───────────────────────────────────────────────────────
 detect_tracks() {
-    local file="$1"
-    _MKV_JSON=$(mkvmerge -J "$file")
+    _MKV_JSON=$(mkvmerge -J "$1")
 }
 
 parse_video_codec() {
-    local info
-    info=$(echo "$_MKV_JSON" | grep -i '"codec_id"' | grep -i 'V_' | head -n 1 || true)
-    # Fallback: usa identify para HEVC/AVC/AV1
-    local identify
-    identify=$(mkvmerge --identify "$1" | grep -i "video" || true)
+    local codec_id
+    codec_id=$(grep -oP '"codec_id":\s*"\K[^"]+' <<< "$_MKV_JSON" \
+        | grep -i '^V_' | head -n 1 || true)
 
-    if   [[ "$identify" == *"HEVC"* || "$identify" == *"H.265"* ]]; then echo "HEVC"
-    elif [[ "$identify" == *"AVC"*  || "$identify" == *"H.264"* ]]; then echo "AVC"
-    elif [[ "$identify" == *"AV1"* ]];                               then echo "AV1"
+    if   [[ "$codec_id" == *"HEVC"* || "$codec_id" == *"H265"* ]]; then echo "HEVC"
+    elif [[ "$codec_id" == *"AVC"*  || "$codec_id" == *"H264"* ]]; then echo "AVC"
+    elif [[ "$codec_id" == *"AV1"*  ]];                             then echo "AV1"
     else
-        warn "Codec de vídeo não reconhecido, assumindo HEVC"
+        warn "Codec de vídeo não reconhecido (${codec_id:-vazio}), assumindo HEVC"
         echo "HEVC"
     fi
 }
 
 parse_audio_codec() {
-    local identify
-    identify=$(mkvmerge --identify "$1" | grep -i "audio" | head -n 1 || true)
+    local codec_id
+    codec_id=$(grep -oP '"codec_id":\s*"\K[^"]+' <<< "$_MKV_JSON" \
+        | grep -i '^A_' | head -n 1 || true)
 
-    if   [[ "$identify" == *"AAC"* ]];  then echo "AAC"
-    elif [[ "$identify" == *"FLAC"* ]]; then echo "FLAC"
-    elif [[ "$identify" == *"Opus"* ]]; then echo "Opus"
+    if   [[ "$codec_id" == *"AAC"*  ]]; then echo "AAC"
+    elif [[ "$codec_id" == *"FLAC"* ]]; then echo "FLAC"
+    elif [[ "$codec_id" == *"OPUS"* ]]; then echo "Opus"
     else
-        warn "Codec de áudio não reconhecido, assumindo AAC"
+        warn "Codec de áudio não reconhecido (${codec_id:-vazio}), assumindo AAC"
         echo "AAC"
     fi
 }
 
 parse_resolution() {
     local altura
-    altura=$(echo "$_MKV_JSON" \
-        | grep -oP '"display_dimensions":\s*"\d+x\K\d+' \
+    altura=$(grep -oP '"display_dimensions":\s*"\d+x\K\d+' <<< "$_MKV_JSON" \
         | head -n 1)
 
     if [[ -z "$altura" ]]; then
-        altura=$(echo "$_MKV_JSON" \
-            | grep -oP '"pixel_dimensions":\s*"\d+x\K\d+' \
+        altura=$(grep -oP '"pixel_dimensions":\s*"\d+x\K\d+' <<< "$_MKV_JSON" \
             | head -n 1)
     fi
 
@@ -200,15 +208,15 @@ main() {
 
     sep
 
-    # Localiza arquivos de entrada — exige exatamente 1 de cada
+    # Localiza arquivos — exige exatamente 1 de cada
     local -a mkv_files ass_files txt_files
     mapfile -t mkv_files < <(find "$pasta" -maxdepth 1 -type f -name "*.mkv" | sort)
     mapfile -t ass_files < <(find "$pasta" -maxdepth 1 -type f -name "*.ass" | sort)
     mapfile -t txt_files < <(find "$pasta" -maxdepth 1 -type f -name "*.txt" | sort)
 
-    (( ${#mkv_files[@]} == 1 )) || die "Esperado 1 arquivo .mkv, encontrado ${#mkv_files[@]} em: $pasta"
-    (( ${#ass_files[@]} == 1 )) || die "Esperado 1 arquivo .ass, encontrado ${#ass_files[@]} em: $pasta"
-    (( ${#txt_files[@]} == 1 )) || die "Esperado 1 arquivo .txt, encontrado ${#txt_files[@]} em: $pasta"
+    [[ ${#mkv_files[@]} -eq 1 ]] || die "Esperado 1 arquivo .mkv, encontrado ${#mkv_files[@]} em: $pasta"
+    [[ ${#ass_files[@]} -eq 1 ]] || die "Esperado 1 arquivo .ass, encontrado ${#ass_files[@]} em: $pasta"
+    [[ ${#txt_files[@]} -eq 1 ]] || die "Esperado 1 arquivo .txt, encontrado ${#txt_files[@]} em: $pasta"
 
     local mkv_original="${mkv_files[0]}"
     local legenda="${ass_files[0]}"
@@ -228,8 +236,8 @@ main() {
     detect_tracks "$mkv_original"
 
     local video_codec audio_codec qualidade
-    video_codec=$(parse_video_codec "$mkv_original")
-    audio_codec=$(parse_audio_codec "$mkv_original")
+    video_codec=$(parse_video_codec)
+    audio_codec=$(parse_audio_codec)
     qualidade=$(parse_resolution)
 
     success "Análise concluída"
@@ -239,9 +247,12 @@ main() {
     echo
 
     # ── Monta nomes ──
-    local nome_base mkv_temp mkv_final
+    local nome_base mkv_temp mkv_final thumb
     nome_base="[$TAG] ${ANIME} - ${EPISODIO} [${qualidade}][${SOURCE}][${video_codec}][${audio_codec}]"
     mkv_temp="${pasta}/${nome_base}_TEMP.mkv"
+
+    # Limpeza de arquivo temporário em qualquer saída
+    trap '[[ -n "${mkv_temp:-}" && -f "${mkv_temp:-}" ]] && rm -f "$mkv_temp"' EXIT
 
     rm -f "$mkv_temp"
 
@@ -262,7 +273,7 @@ main() {
             --generate-chapters-name-template 'Capítulo <NUM:2>' \
             --track-order 0:0,0:1,1:0
 
-    # ── CRC-32 (direto, sem subshell serializado) ──
+    # ── CRC-32 ──
     step "Calculando CRC-32..."
     local hash
     hash=$(calc_crc32 "$mkv_temp")
@@ -270,13 +281,13 @@ main() {
 
     mkv_final="${pasta}/${nome_base}[${hash}].mkv"
     mv -- "$mkv_temp" "$mkv_final"
+    mkv_temp=""  # limpa var pra trap não tentar deletar arquivo já renomeado
 
     # ── Thumbnail ──
+    thumb="${pasta}/${nome_base}[${hash}].webp"
     spinner "Gerando thumbnail (ts=${THUMB_TS})..." \
-        ffmpeg -ss "$THUMB_TS" -i "$mkv_final" -vf "thumbnail,setsar=1" -vframes 1 \
-            "${pasta}/${nome_base}[${hash}].webp" -y
-
-    local thumb="${pasta}/${nome_base}[${hash}].webp"
+        ffmpeg -loglevel error -ss "$THUMB_TS" -i "$mkv_final" \
+            -vf "thumbnail,setsar=1" -vframes 1 "$thumb" -y
 
     # ── Resumo final ──
     local duracao
