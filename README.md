@@ -68,8 +68,8 @@ episodio/
 ### Executando
 
 ```bash
-chmod +x gerar_ep.sh
-./gerar_ep.sh /caminho/da/pasta
+chmod +x cfsb_muxer.sh
+./cfsb_muxer.sh /caminho/da/pasta
 ```
 
 O script vai pedir três informações:
