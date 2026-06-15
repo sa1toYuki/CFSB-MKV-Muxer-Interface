@@ -7,11 +7,11 @@ Script Bash para multiplexação de episódios de anime no padrão de fansub. Co
 ## ✨ O que o script faz
 
 1. Detecta automaticamente os arquivos `.mkv`, `.ass` e `.txt` na pasta informada
-2. Coleta nome do anime, número do episódio e source via prompt interativo
+2. Coleta nome do anime, número do episódio, source e tempo para gerar a thumbnail via prompt interativo
 3. Identifica codecs de vídeo (HEVC / AVC / AV1) e áudio (AAC / FLAC / Opus) e resolução diretamente do arquivo
 4. Multiplexa as faixas com `mkvmerge`, configurando idiomas e flags corretamente
 5. Calcula o hash CRC-32 do arquivo final e renomeia com ele
-6. Gera uma thumbnail `.webp` a partir do segundo 00:30 do episódio
+6. Gera uma thumbnail `.webp` a partir do tempo especificado pelo usuário
 
 O arquivo de saída segue o padrão:
 ```
@@ -27,7 +27,7 @@ O arquivo de saída segue o padrão:
 |---|---|
 | `mkvmerge` / `mkvinfo` | Multiplexação e análise do MKV (pacote `mkvtoolnix`) |
 | `ffmpeg` | Geração da thumbnail |
-| `crc32` ou `cfv` | Cálculo do hash CRC-32 |
+| `crc32` ou `perl` com `Digest::CRC32` | Cálculo do hash CRC-32 |
 
 ### Linux
 
@@ -72,12 +72,13 @@ chmod +x cfsb_muxer.sh
 ./cfsb_muxer.sh /caminho/da/pasta
 ```
 
-O script vai pedir três informações:
+O script vai pedir quatro informações:
 
 ```
 🎬 Nome do Anime      : Dragon Ball Z
 📺 Número do Episódio : 042
 💿 Source             : WEB-DL
+📸 Tempo para gerar thumbnail (segundos) [30] : 60
 ```
 
 ---
@@ -101,5 +102,5 @@ CHAPTER02NAME=Parte A
 - Faixa de legenda marcada como `pt-BR` (Português do Brasil)
 - Nomes de capítulos gerados automaticamente como `Capítulo 01`, `Capítulo 02`...
 - Hash CRC-32 calculado após muxing e inserido no nome final do arquivo
-- Thumbnail extraída em `.webp` no timestamp `00:00:30` com filtro `thumbnail,setsar=1`
+- Thumbnail extraída em `.webp` no timestamp especificado pelo usuário com filtro `thumbnail,setsar=1`
 - Cores e spinner desativados automaticamente quando stdout não é um TTY (útil para logs/pipes)
