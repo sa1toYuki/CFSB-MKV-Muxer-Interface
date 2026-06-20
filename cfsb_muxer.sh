@@ -265,11 +265,15 @@ main() {
     sep
 
     local source_mkv subtitle chapters
-    local mkv_count ass_count txt_count
+    local mkv_count ass_count txt_count fonts_count=0
 
     mkv_count=$(find "$folder" -maxdepth 1 -type f -name "*.mkv" | wc -l)
     ass_count=$(find "$folder" -maxdepth 1 -type f -name "*.ass" | wc -l)
     txt_count=$(find "$folder" -maxdepth 1 -type f -name "*.txt" | wc -l)
+
+    if [[ -d "$folder/fonts" ]]; then
+        fonts_count=$(find "$folder/fonts" -type f | wc -l)
+    fi
 
     (( mkv_count <= 1 )) || die "Mais de um arquivo .mkv encontrado em: $folder — deixe apenas um por pasta."
     (( ass_count <= 1 )) || die "Mais de um arquivo .ass encontrado em: $folder — deixe apenas um por pasta."
@@ -289,6 +293,9 @@ main() {
     detail "🎞  $(basename "$source_mkv")"
     detail "💬  $(basename "$subtitle")"
     detail "📖  $(basename "$chapters")"
+    if (( fonts_count > 0 )); then
+        detail "📎  Pasta fonts com $fonts_count aquivo(s)"
+    fi
 
     prompt_user
     prompt_thumbnail
@@ -330,14 +337,26 @@ main() {
         source_track_order+="0:${i},"
     done
 
+    # ── Fonts ─────────────────────────────────────────────────────────────────
+    local attachment_args=()
+    if (( fonts_count > 0 )); then
+        attachment_args+=(--no-attachments)
+        while IFS= read -r -d '' font_file; do
+            attachment_args+=(--attach-file "$font_file")
+        done < <(find "$folder/fonts" -type f \( -iname "*.ttf" -o -iname "*.otf" \) -print0)
+    fi
+    
     # ── Mux with spinner ──
     spinner "Multiplexando faixas..." \
         mkvmerge \
             --ui-language pt_BR \
             --priority lower \
             --output "$mkv_temp" \
+            --title "" \
             --no-subtitles \
             --no-chapters \
+            "${attachment_args[@]}" \
+            --no-global-tags \
             --language 1:ja-JP \
             --track-name '1:Japonês' \
             --original-flag 1:yes \
